@@ -1,64 +1,55 @@
-const express = require("express");
-const axios = require("axios");
-const bodyParser = require("body-parser");
+import express from "express";
+import bodyParser from "body-parser";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(bodyParser.json());
 
-// ⚠️ IMPORTANTE: la API Key la pondrás en Render (no aquí en el código)
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-
-// Endpoint para pedir respuesta de voz
 app.post("/gemini-audio", async (req, res) => {
   try {
     const { text } = req.body;
 
     if (!text) {
-      return res.status(400).json({ error: "Falta el texto en la petición" });
+      return res.status(400).json({ error: "Falta el parámetro 'text'" });
     }
 
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-exp-native-audio-thinking-dialog:generateContent?key=${GOOGLE_API_KEY}`,
+    const apiKey = process.env.GOOGLE_API_KEY;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/tts-1:generateContent?key=${apiKey}`,
       {
-        contents: [
-          {
-            role: "user",
-            parts: [{ text }]
-          }
-        ],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          audioConfig: {
-            voiceConfig: {
-              voiceName: "Puck"
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text }]
             }
-          }
-        }
-      },
-      {
-        headers: {
-          "Content-Type": "application/json"
-        }
+          ]
+        })
       }
     );
 
-    const audioData =
-      response.data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    const data = await response.json();
+    console.log("Respuesta de Gemini:", JSON.stringify(data, null, 2));
 
-    if (!audioData) {
-      return res.status(500).json({ error: "No se recibió audio desde la API" });
+    const audioBase64 = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+    if (!audioBase64) {
+      return res.status(500).json({ error: "No se generó audio", raw: data });
     }
 
-    const audioBuffer = Buffer.from(audioData, "base64");
-    res.setHeader("Content-Type", "audio/wav");
-    res.send(audioBuffer);
+    res.status(200).json({
+      audio: audioBase64,
+      mimeType: "audio/wav"
+    });
+
   } catch (error) {
-    console.error("Error en /gemini-audio:", error.response?.data || error.message);
+    console.error("Error en /gemini-audio:", error);
     res.status(500).json({ error: "Error al procesar la petición" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-});
+app.listen(3000, () => console.log("Servidor corriendo en puerto 3000"));
+
