@@ -1,101 +1,38 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import { GoogleGenAI, Modality } from "@google/genai";
-
-dotenv.config();
-
+const express = require("express");
+const axios = require("axios");
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.GEMINI_API_KEY;
 
-if (!API_KEY) {
-  console.error("ERROR: define GEMINI_API_KEY en .env");
-  process.exit(1);
-}
+// 👇 Reemplaza con tu API key real de Google o la que uses
+const API_KEY = "AIzaSyC3895F5JKZSHKng1IVL_3DywImp4lwVyI";  
 
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-const MODEL = "gemini-2.5-flash-exp-native-audio-thinking-dialog";
-
-app.post("/chat", async (req, res) => {
+app.get("/audio", async (req, res) => {
   try {
-    const userText = (req.body?.text || "").toString();
-    if (!userText) return res.status(400).json({ error: "Falta campo 'text' en el body" });
+    const texto = req.query.text || "Hola Karla, tu sistema ya responde en audio. 🎙️";
 
-    const queue = [];
-    const session = await ai.live.connect({
-      model: MODEL,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        audioFormat: "MP3"
-      },
-      callbacks: {
-        onmessage: (m) => queue.push(m),
-        onerror: (e) => queue.push({ error: e?.message || String(e) })
+    const response = await axios.post(
+      "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + API_KEY,
+      {
+        input: { text: texto },
+        voice: { languageCode: "es-ES", name: "es-ES-Standard-A" },
+        audioConfig: { audioEncoding: "MP3" }
       }
-    });
+    );
 
-    session.sendClientContent({
-      turns: [{ role: "user", parts: [{ text: userText }] }],
-      turnComplete: true
-    });
+    const audioBase64 = response.data.audioContent;
+    const audioBuffer = Buffer.from(audioBase64, "base64");
 
-    let audioBase64 = "";
-    let finished = false;
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(audioBuffer);
 
-    while (!finished) {
-      const msg = await new Promise((resolve) => {
-        const poll = () => {
-          const m = queue.shift();
-          if (m) resolve(m);
-          else setTimeout(poll, 25);
-        };
-        poll();
-      });
-
-      if (msg?.error) throw new Error(msg.error);
-      
-      if (msg?.audio) {
-        audioBase64 += msg.audio;
-      } else if (msg?.serverContent?.parts) {
-        for (const p of msg.serverContent.parts) {
-          if (p.inlineData?.data) audioBase64 += p.inlineData.data;
-        }
-      }
-
-      if (msg?.serverContent?.turnComplete) finished = true;
-    }
-
-    await session.close();
-
-    if (!audioBase64) return res.status(500).json({ error: "No se recibió audio del modelo" });
-
-    res.json({
-      candidates: [
-        {
-          content: {
-            role: "model",
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "audio/mpeg",
-                  data: audioBase64
-                }
-              }
-            ]
-          }
-        }
-      ]
-    });
-  } catch (err) {
-    console.error("ERROR:", err);
-    res.status(500).json({ error: err?.message || String(err) });
+  } catch (error) {
+    console.error(error.response?.data || error.message);
+    res.status(500).send("Error al generar el audio");
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Proxy listo en http://localhost:${PORT}/chat`);
+  console.log("Servidor de audio corriendo en puerto " + PORT);
 });
+
